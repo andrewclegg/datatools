@@ -1,0 +1,63 @@
+#!/usr/bin/env python
+
+import re
+import fileinput
+from datetime import datetime
+from sys import argv, stdout, stderr, exit
+from optparse import OptionParser
+
+usage = "Usage: %prog <options> [logfile...]\n" + \
+        "Select date range from files or stdin.\n" + \
+        "Data must be in ascending date order."
+
+op = OptionParser(usage=usage)
+op.add_option("-s", "--start", dest="start", metavar="DATETIME_START",
+        help="Select rows with timestamp >= DATETIME_START")
+op.add_option("-e", "--end", dest="end", metavar="DATETIME_END",
+        help="Select rows with timestamp < DATETIME_END; default: all remaining rows")
+op.add_option("-r", "--regex", dest="regex", metavar="REGEX",
+        default='\d{2}/[A-Z][a-z]{2}/\d{4}:\d{2}:\d{2}:\d{2}',
+        help="Regex to extract timestamp from lines, using subgroup if required; default: %default")
+op.add_option("-f", "--format", dest="fmt", metavar="FORMAT",
+        default='%d/%b/%Y:%H:%M:%S',
+        help="Datetime format, srptime style, default: %default")
+
+(options, files) = op.parse_args()
+
+if options.start is None:
+    op.print_help()
+    exit(1)
+
+start = datetime.strptime(options.start, options.fmt)
+end = datetime.strptime(options.end, options.fmt) if options.end else None
+regex = re.compile(options.regex)
+
+def extract(line, regex, fmt):
+    match = regex.search(line)
+    if match is None:
+        raise Exception("No date found in line: %s" % line.rstrip())
+    if len(match.groups()) > 0:
+        return datetime.strptime(match.group(1), fmt)
+    return datetime.strptime(match.group(0), fmt)
+
+output = False
+if options.end:
+    # Slower method as we have to parse date every line
+    for line in fileinput.input(files):
+        curr = extract(line, regex, options.fmt)
+        if curr >= end:
+            exit(0)
+        if curr >= start:
+            output = True
+        if output:
+            stdout.write(line)
+else:
+    # Faster method, we only have to parse date until we see first hit
+    for line in fileinput.input(files):
+        if not output:
+            curr = extract(line, regex, options.fmt)
+            if curr >= start:
+                output = True
+        if output:
+            stdout.write(line)
+
